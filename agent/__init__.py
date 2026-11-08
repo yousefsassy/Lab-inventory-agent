@@ -1,0 +1,1 @@
+"""Lab inventory agent."""
