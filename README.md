@@ -87,12 +87,14 @@ The current suite covers budget boundaries, action exhaustion, approval and
 rejection, stale prices, transaction rollback, duplicate writes, and local
 configuration. The automated OpenAI adapter test uses a simulated response.
 
-The eval harness currently runs four deterministic trajectory scenarios from a
+The eval harness currently runs ten deterministic trajectory scenarios from a
 fresh sandbox each time and reports task success, step accuracy, tool-call
-precision, wasted steps, and p50/p95 time. Milestones 1–3 cover policy, sandbox
-tools, and the interactive runner. The remaining course work is expanding the
-eval to 30+ scenarios and injection cases, then the error taxonomy, adversarial
-tests, cost measurements, and final report.
+precision, wasted steps, and p50/p95 time. The scenarios cover the happy path,
+budget and rejection stops, wasted reads, wrong and malformed actions, a model
+timeout, action-limit exhaustion, supplier unavailability, and stock changing
+during approval. This is the base for the error taxonomy. The remaining course
+work is expanding to 30+ scenarios and injection cases, then `errors.md`,
+adversarial tests, cost measurements, and the final report.
 
 ## Contributions
 

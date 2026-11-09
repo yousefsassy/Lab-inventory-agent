@@ -5,7 +5,11 @@ answer. Add cases here; run_eval.py executes every scenario against a fresh
 sandbox database.
 """
 
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
 
 PROPOSAL = {"tool": "propose_order", "arguments": {}}
 
@@ -37,6 +41,18 @@ def tools_for(actions):
     return tuple(expected)
 
 
+def gloves_out_of_stock(database):
+    """Make the supplier unable to fill the gloves refill."""
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("UPDATE items SET available = 0 WHERE sku = 'gloves'")
+
+
+def stock_changes_before_write(database):
+    """Simulate stock arriving between approval and the write."""
+    with closing(sqlite3.connect(database)) as connection, connection:
+        connection.execute("UPDATE items SET on_hand = 3 WHERE sku = 'gloves'")
+
+
 @dataclass(frozen=True)
 class Scenario:
     name: str
@@ -50,6 +66,9 @@ class Scenario:
     expected_orders: int = 0
     expected_total_minor: int = 0
     max_actions: int = 20
+    model_error: bool = False
+    setup_db: Callable[[Path], None] | None = None
+    before_approval: Callable[[Path], None] | None = None
 
 
 FULL_PATH = reads(("gloves", "tubes")) + (PROPOSAL,)
@@ -107,5 +126,81 @@ SCENARIOS = (
         expected_tools=tools_for(FULL_PATH) + ({"tool": "place_purchase_order", "input": None},),
         expected_orders=1,
         expected_total_minor=2400,
+    ),
+    Scenario(
+        name="wrong_sku_then_recovers",
+        skus=("gloves", "tubes"),
+        budget_minor=3000,
+        actions=({"tool": "check_stock", "arguments": {"sku": "masks"}},) + FULL_PATH,
+        approve=True,
+        expected_status="ordered",
+        expected_actions=FULL_PATH,
+        expected_tools=tools_for(FULL_PATH) + ({"tool": "place_purchase_order", "input": None},),
+        expected_orders=1,
+        expected_total_minor=2400,
+    ),
+    Scenario(
+        name="malformed_action_then_recovers",
+        skus=("gloves", "tubes"),
+        budget_minor=3000,
+        actions=(None, {"tool": "check_stock", "arguments": {"sku": []}}) + FULL_PATH,
+        approve=True,
+        expected_status="ordered",
+        expected_actions=FULL_PATH,
+        expected_tools=tools_for(FULL_PATH) + ({"tool": "place_purchase_order", "input": None},),
+        expected_orders=1,
+        expected_total_minor=2400,
+    ),
+    Scenario(
+        name="model_timeout",
+        skus=("gloves",),
+        budget_minor=3000,
+        actions=(),
+        approve=False,
+        expected_status="model_error",
+        expected_actions=(),
+        expected_tools=(),
+        expected_orders=0,
+        model_error=True,
+    ),
+    Scenario(
+        name="action_limit_exhausted",
+        skus=("gloves",),
+        budget_minor=3000,
+        actions=tuple({"tool": "check_stock", "arguments": {"sku": "gloves"}} for _ in range(3)),
+        approve=True,
+        expected_status="action_limit",
+        expected_actions=tuple(
+            {"tool": "check_stock", "arguments": {"sku": "gloves"}} for _ in range(3)
+        ),
+        expected_tools=tuple(
+            {"tool": "check_stock", "input": {"sku": "gloves"}} for _ in range(3)
+        ),
+        expected_orders=0,
+        max_actions=6,
+    ),
+    Scenario(
+        name="supplier_unavailable",
+        skus=("gloves",),
+        budget_minor=3000,
+        actions=reads(("gloves",)) + (PROPOSAL,),
+        approve=False,
+        expected_status="supplier_unavailable",
+        expected_actions=reads(("gloves",)) + (PROPOSAL,),
+        expected_tools=tools_for(reads(("gloves",))),
+        expected_orders=0,
+        setup_db=gloves_out_of_stock,
+    ),
+    Scenario(
+        name="stock_changes_during_approval",
+        skus=("gloves", "tubes"),
+        budget_minor=3000,
+        actions=FULL_PATH,
+        approve=True,
+        expected_status="write_failed",
+        expected_actions=FULL_PATH,
+        expected_tools=tools_for(FULL_PATH) + ({"tool": "place_purchase_order", "input": None},),
+        expected_orders=0,
+        before_approval=stock_changes_before_write,
     ),
 )

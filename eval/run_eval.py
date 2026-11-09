@@ -9,6 +9,7 @@ keeps it offline; point the same harness at a live model later.
 """
 
 import json
+import difflib
 import sqlite3
 import statistics
 import tempfile
@@ -16,27 +17,44 @@ import time
 from contextlib import closing
 from pathlib import Path
 
-from agent.models import ScriptedModel
+from agent.models import ModelError, ScriptedModel
 from agent.runner import run
 from sandbox.setup import initialize
 
 from eval.scenarios import SCENARIOS
 
 
+class TimeoutModel:
+    """A model adapter that fails before returning any action."""
+
+    usage = {}
+
+    def next_action(self, history):
+        raise ModelError("OpenAI connection failed or timed out")
+
+
 def _events(path):
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def _action_matches(expected, actual):
-    return expected == actual
+def _matched_count(expected, actual):
+    """Count aligned matches, ignoring position shifts from extra steps."""
+    if not expected:
+        return 0
+    left = [json.dumps(item, sort_keys=True) for item in expected]
+    right = [json.dumps(item, sort_keys=True) for item in actual]
+    return sum(
+        block.size
+        for block in difflib.SequenceMatcher(None, left, right, autojunk=False)
+        .get_matching_blocks()
+    )
 
 
-def _tool_matches(expected, actual):
-    if expected["tool"] != actual.get("tool"):
-        return False
-    if expected.get("input") is None:
-        return True
-    return expected["input"] == actual.get("input")
+def _tool_key(event):
+    name = event.get("tool")
+    if name == "place_purchase_order":
+        return {"tool": name, "input": None}
+    return {"tool": name, "input": event.get("input")}
 
 
 def run_scenario(scenario):
@@ -45,13 +63,21 @@ def run_scenario(scenario):
         database = root / "eval.sqlite3"
         trace = root / "trace.jsonl"
         initialize(database)
+        if scenario.setup_db is not None:
+            scenario.setup_db(database)
+
+        def approve(*args):
+            if scenario.before_approval is not None:
+                scenario.before_approval(database)
+            return scenario.approve
+
         started = time.perf_counter()
         result = run(
-            ScriptedModel(scenario.actions),
+            TimeoutModel() if scenario.model_error else ScriptedModel(scenario.actions),
             database,
             list(scenario.skus),
             scenario.budget_minor,
-            lambda *args: scenario.approve,
+            approve,
             trace,
             scenario.max_actions,
         )
@@ -65,15 +91,16 @@ def run_scenario(scenario):
     actions = [event["output"] for event in events if event["type"] == "model"]
     tool_calls = [event for event in events if event["type"] == "tool"]
 
-    matched_actions = sum(
-        1 for expected, actual in zip(scenario.expected_actions, actions)
-        if _action_matches(expected, actual)
+    matched_actions = _matched_count(scenario.expected_actions, actions)
+    matched_tools = _matched_count(
+        [_tool_key(tool) for tool in scenario.expected_tools],
+        [_tool_key(tool) for tool in tool_calls],
     )
-    matched_tools = sum(
-        1 for expected, actual in zip(scenario.expected_tools, tool_calls)
-        if _tool_matches(expected, actual)
+    step_accuracy = (
+        matched_actions / max(len(scenario.expected_actions), len(actions))
+        if scenario.expected_actions or actions
+        else 1.0
     )
-    step_accuracy = matched_actions / max(len(scenario.expected_actions), len(actions))
     tool_precision = matched_tools / len(tool_calls) if tool_calls else 1.0
     success = (
         result["status"] == scenario.expected_status
