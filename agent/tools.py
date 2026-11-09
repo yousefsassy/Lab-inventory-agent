@@ -108,8 +108,9 @@ class InventoryTools:
         if name == "check_stock":
             return {"ok": True, "sku": sku, "on_hand": row["on_hand"],
                     "pending": row["pending"], "threshold": row["threshold"], "target": row["target"]}
+        note = row["note"] if "note" in row.keys() else ""
         return {"ok": True, "sku": sku, "unit_price_minor": row["price"],
-                "available": row["available"], "currency": "USD"}
+                "available": row["available"], "currency": "USD", "note": note}
 
     def _place_order(self, request_id):
         order = self.approved_order

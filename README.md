@@ -21,6 +21,10 @@ refill, and shows **$6** remaining. Type `yes` to create the sandbox order or
 `no` to reject it. The sample inventory also includes `masks`, which start above
 their reorder threshold. The SKU order sets purchasing priority.
 
+The tube supplier note contains an injection attempt. `get_supplier_offer`
+returns it as untrusted text; the host ignores any instructions inside it and
+still applies the budget and the human checkpoint.
+
 To clear sandbox orders and restore the original stock and offers, run
 `python -m sandbox.setup --reset`.
 
@@ -43,6 +47,8 @@ Keep real credentials in the ignored `.env` file or in your shell environment.
 ## How it works
 
 1. The model calls `check_stock` and `get_supplier_offer` for the requested SKUs.
+   The offer includes a free-text supplier note. That note is data, not an
+   instruction: the host never executes anything it says.
 2. The planner considers eligible refills in priority order. It uses on-hand
    stock plus pending deliveries, and only proposes full refills that fit
    both supplier availability and the remaining budget.
@@ -74,7 +80,8 @@ review a new proposal.
 | [agent/__main__.py](agent/__main__.py) | Terminal interface and local settings |
 | [sandbox/](sandbox/) | Sample inventory and database initialization and reset |
 | [eval/](eval/) | Trajectory scenarios and the path-level eval harness |
-| [tests/](tests/) | Policy, database, runner, and configuration tests |
+| [errors.md](errors.md) | Error taxonomy mapped to the scenario and test that proves each class |
+| [tests/](tests/) | Policy, database, runner, injection, and configuration tests |
 
 ## Tests and project status
 
@@ -84,17 +91,19 @@ python -m eval.run_eval
 ```
 
 The current suite covers budget boundaries, action exhaustion, approval and
-rejection, stale prices, transaction rollback, duplicate writes, and local
-configuration. The automated OpenAI adapter test uses a simulated response.
+rejection, stale prices, transaction rollback, duplicate writes, injection
+handling, and local configuration. The automated OpenAI adapter test uses a
+simulated response. The error classes and their proofs are listed in
+[errors.md](errors.md).
 
-The eval harness currently runs ten deterministic trajectory scenarios from a
-fresh sandbox each time and reports task success, step accuracy, tool-call
+The eval harness currently runs fifteen deterministic trajectory scenarios from
+a fresh sandbox each time and reports task success, step accuracy, tool-call
 precision, wasted steps, and p50/p95 time. The scenarios cover the happy path,
 budget and rejection stops, wasted reads, wrong and malformed actions, a model
-timeout, action-limit exhaustion, supplier unavailability, and stock changing
-during approval. This is the base for the error taxonomy. The remaining course
-work is expanding to 30+ scenarios and injection cases, then `errors.md`,
-adversarial tests, cost measurements, and the final report.
+timeout, action-limit exhaustion, supplier unavailability, stock changing
+during approval, and five injection attempts. The remaining course work is
+expanding to 30+ scenarios, adding the cost model, and writing the report and
+postmortem.
 
 ## Contributions
 
