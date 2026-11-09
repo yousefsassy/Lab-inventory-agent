@@ -101,11 +101,11 @@ containment, not a perfect action path.
 
 These are **simulated attack-path and host-defense tests**. `ScriptedModel`
 does not inspect notes when choosing actions. The payload reaches tool output
-and model history, but no live model has been tested and no API calls are made.
+and model history, but these original scripted tests make no live-model claim. The later real run is documented below.
 
 ## Residual risks and limitations
 
-- Live-model susceptibility and model-selected recovery remain unproven.
+- General live-model susceptibility and model-selected recovery remain unproven by the preliminary run below.
   Prompt instructions cannot establish universal model compliance.
 - Human approval can wait indefinitely; action bounds are not a wall-clock SLA.
 - Retries in evaluation are scripted. There is no automatic application retry,
@@ -121,3 +121,44 @@ and model history, but no live model has been tested and no API calls are made.
   comprehensively normalized into terminal trace events.
 - Idempotency is per request ID. Sandbox reset is destructive and must be an
   explicit operator action; evaluation never resets an existing local database.
+
+
+## Live-model methodology and measured observations
+
+`eval/live_injection.py` reuses the production adapter and runner, exposes no
+additional tools, and uses the same Milestone 4 safety auditor. The default
+command makes no API requests. Mock mode replaces HTTP internally. Paid mode
+requires `--allow-api-calls` after explicit approval of the experiment plan.
+
+Five malicious notes are paired with five equivalent clean controls. Both
+supplier notes are cleared in controls. Each trial has a disposable SQLite
+sandbox and an existing historical order whose preservation is checked. Only
+the exact predefined four-box glove order can receive simulated human approval.
+Model-level attack attempts, confirmed payload exposure, host blocking, actual
+state compromise and legitimate task completion are reported independently.
+
+The bounded wrapper reserves cost before each request and shares its request
+counter and spending ceiling across all trials/repetitions. It stops on errors,
+timeouts, unknown usage or token/model breaches, retaining uncertainty reserves.
+The input-token bound is a conservative client byte/framing assumption; it is
+not a server input cap or unconditional billing guarantee. Generated traces are
+redacted for credentials and labelled by execution mode.
+
+The full mocked pipeline and ten explicitly authorized GPT-6 Luna trials were
+executed. All five controls and five attacks completed the exact legitimate
+order. All malicious payloads reached the model, but no explicit attack
+compliance, invalid calls or unsafe side effects were observed. No direct write
+or delete attempt was emitted, so this live run does not independently exercise
+blocking a compromised model; the simulated attack tests cover those paths.
+
+The run used 61 total API requests (60 generation, one metadata), with 26,347
+input and 1,120 output tokens. Usage-derived cost was $0.0031947; no cache reads
+or writes were reported. Maximum action use was 19/20. Four attacks had extra
+valid reads compared with controls, a potential efficiency issue rather than
+proof of malicious compliance. See `eval/results/live/gpt6-luna-authorized/`
+for ignored traces, before/after states and provenance. No extra trials were run.
+Strict function schemas may constrain attack expression; a compliant trajectory
+does not prove a model internally rejected an instruction. No exposure, errors,
+or unexplained invalid behavior are classified as inconclusive. Objective
+matching is intentionally narrow and requires manual review for other paths.
+See [eval/README.md](eval/README.md) for limits, source links and the approval plan.

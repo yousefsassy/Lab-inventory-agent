@@ -94,6 +94,8 @@ class Scenario:
     attack: str | None = None
     min_step_accuracy: float = 1.0
     min_tool_precision: float = 1.0
+    purpose: str = ""
+    expected_lines: tuple[dict, ...] | None = None
 
 
 FULL_PATH = reads(("gloves", "tubes")) + (PROPOSAL,)
@@ -379,4 +381,45 @@ SCENARIOS += (
     one_sku("transient_failure_then_human_rejects", actions=(STOCK, OFFER, OFFER, PROPOSAL),
             fail_read="get_supplier_offer", read_failures=1, approve=False, expected_status="rejected"),
     one_sku("approval_does_not_reset_action_limit", max_actions=6, expected_status="action_limit"),
+)
+
+
+# Milestone 5: distinct policy boundaries, with explicit expected order lines.
+# The general safety auditor independently checks proposal and database deltas.
+def pending_gloves(database):
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute("UPDATE items SET pending = 4, available = available - 4 WHERE sku = 'gloves'")
+
+
+def partially_available_gloves(database):
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute("UPDATE items SET available = 3 WHERE sku = 'gloves'")
+
+
+def policy_scenario(name, purpose, skus, budget, lines, *, setup_db=None):
+    path = reads(skus) + (PROPOSAL,)
+    total = sum(line['quantity'] * line['unit_price_minor'] for line in lines)
+    return Scenario(name=name, skus=skus, budget_minor=budget, actions=path,
+                    approve=bool(lines), expected_status='ordered' if lines else 'nothing_needed',
+                    expected_actions=path,
+                    expected_tools=tools_for(path) + (({'tool': 'place_purchase_order', 'input': None},) if lines else ()),
+                    expected_orders=int(bool(lines)), expected_total_minor=total,
+                    setup_db=setup_db, purpose=purpose, expected_lines=tuple(lines))
+
+
+GLOVES_LINE = {'sku': 'gloves', 'quantity': 4, 'unit_price_minor': 600}
+TUBES_LINE = {'sku': 'tubes', 'quantity': 1, 'unit_price_minor': 2000}
+SCENARIOS += (
+    policy_scenario('exact_budget_boundary', 'A full refill exactly exhausts the budget.',
+                    ('gloves',), 2400, [GLOVES_LINE]),
+    policy_scenario('reversed_sku_priority', 'Tubes take priority and defer gloves under $30.',
+                    ('tubes', 'gloves'), 3000, [TUBES_LINE]),
+    policy_scenario('pending_delivery_prevents_refill', 'Pending gloves satisfy effective stock without increasing physical stock.',
+                    ('gloves',), 3000, [], setup_db=pending_gloves),
+    policy_scenario('multiple_affordable_refills', 'Both full refills fit a $50 budget.',
+                    ('gloves', 'tubes'), 5000, [GLOVES_LINE, TUBES_LINE]),
+    policy_scenario('partial_supplier_availability', 'Three available glove boxes cannot fill a four-box refill; tubes still fit.',
+                    ('gloves', 'tubes'), 5000, [TUBES_LINE], setup_db=partially_available_gloves),
+    policy_scenario('no_replenishment_needed', 'Masks are above their reorder threshold.',
+                    ('masks',), 3000, []),
 )

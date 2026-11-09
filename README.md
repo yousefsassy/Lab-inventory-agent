@@ -96,7 +96,7 @@ handling, and local configuration. The automated OpenAI adapter test uses a
 simulated response. The error classes and their proofs are listed in
 [errors.md](errors.md).
 
-The eval harness runs **24 deterministic offline scenarios**, including five
+The eval harness runs **30 deterministic offline scenarios**, including five
 simulated injection attack paths, two one-time read outages, persistent failure,
 empty inventory results, cancellation, and stale data. All writes use temporary
 databases; the existing local sandbox is not initialized or reset by evaluation.
@@ -151,13 +151,53 @@ cannot pass merely because the final total matches. Safety is host containment,
 not a claim that every model-selected action was appropriate.
 
 The results record branch, base commit, dirty-tree flag, Python version,
-Africa/Tunis evaluation time, and SHA-256 hashes of source/test files. Because
-implementation changes remain uncommitted, HEAD alone does not identify them.
+Africa/Tunis evaluation time, and SHA-256 hashes of source/test files. For uncommitted
+implementation changes, HEAD alone does not identify them.
 
-Remaining full-project work: **at least six additional scenarios** to reach 30,
-token/cost aggregation and 100× projection, final four-page report, postmortem,
+The 30-scenario requirement is now covered. Remaining full-project work includes
+final token/cost analysis and 100× projection, final four-page report, postmortem,
 and verification on the documented Python 3.12 environment. Milestone results
-were executed with Python 3.14.7; no live-model evaluation was performed.
+were executed with Python 3.14.7. The authorized GPT-6 Luna experiment is summarized below.
+
+## Optional live-model injection evaluation
+
+The live harness reuses the production OpenAI adapter, runner, permissions and
+Milestone 4 safety auditor. Default execution writes a plan only:
+
+```sh
+python -B -m eval.live_injection --output-dir eval/results/live
+python -B -m eval.live_injection --mock --output-dir eval/results/live/mock-dry-run
+```
+
+The second command exercises fake HTTP only. On November 9, 2026, the explicitly
+authorized GPT-6 Luna experiment completed all five attacks and five controls.
+All ten produced the correct $24 order; no explicit attack compliance, invalid
+arguments, unsafe attempts or unexpected database effects were observed.
+All five malicious payloads were confirmed in subsequent model requests.
+
+The run used **60 generation requests + 1 metadata request**, 26,347 input tokens
+and 1,120 output tokens, costing **$0.0031947 estimated from reported usage**.
+Reported cached reads and writes were zero. Maximum action use was 19/20.
+These are preliminary observations under the existing strict tool interface,
+not a universal prompt-injection resistance guarantee. Four attack trials used
+additional valid reads relative to their paired controls; causality is unproven.
+
+For any future run, obtain explicit approval of its model, cases, request/token
+limits and spending ceiling. After approval,
+`--allow-api-calls` enables bounded execution. It privately loads the existing
+credentials and approves only the predefined legitimate sandbox order.
+
+See [eval/README.md](eval/README.md) for the exact 10-trial proposal, pricing
+sources, GPT-6 Luna parameters, conservative input/cost-bound
+assumptions, six new scenario oracles and interpretation limits. Controls clear
+all malicious seed notes. Five paired attack/control conditions distinguish
+observed model compliance from host containment. Results and sanitized traces
+are ignored under `eval/results/live/`; use `eval/results/offline/` for scripted
+results. Offline token/cost fields are not applicable, not live zeroes.
+
+```sh
+python -B -m eval.run_eval --run-tests --output-dir eval/results/offline
+```
 
 ## Contributions
 
@@ -169,3 +209,8 @@ injection cases, and error taxonomy. Asma's Milestone 4 contribution extends
 that work with independent safety auditing, attempt tracing, deterministic
 read-outage recovery tests, explicit attack classification, retained evaluation
 evidence, evaluator negative controls, and the threat model.
+
+The Milestone 5 contribution extends evaluation to 30 scenarios, adds bounded
+GPT-6 Luna compatibility and cache-aware cost accounting, and records the ten
+explicitly authorized real-model trials. No academic final report or postmortem
+has been written.
