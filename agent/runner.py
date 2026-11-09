@@ -42,6 +42,8 @@ def run(model, database, skus, budget_minor, approve, trace_path, max_actions=20
                 record({"type": "model", "input": history.copy(), "output": action,
                         "usage": getattr(model, "usage", {}), "duration_seconds": time.perf_counter() - started})
                 state = state.consume()
+                # Record attempts even when validation rejects them before a tool runs.
+                record({"type": "attempt", "action": action, "actions_used": state.used})
                 if type(action) is not dict or set(action) != {"tool", "arguments"} or type(action.get("tool")) is not str:
                     result = {"ok": False, "error": "Return tool and arguments fields"}
                 elif action["tool"] == "propose_order":

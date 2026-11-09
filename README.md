@@ -96,17 +96,76 @@ handling, and local configuration. The automated OpenAI adapter test uses a
 simulated response. The error classes and their proofs are listed in
 [errors.md](errors.md).
 
-The eval harness currently runs fifteen deterministic trajectory scenarios from
-a fresh sandbox each time and reports task success, step accuracy, tool-call
-precision, wasted steps, and p50/p95 time. The scenarios cover the happy path,
-budget and rejection stops, wasted reads, wrong and malformed actions, a model
-timeout, action-limit exhaustion, supplier unavailability, stock changing
-during approval, and five injection attempts. The remaining course work is
-expanding to 30+ scenarios, adding the cost model, and writing the report and
-postmortem.
+The eval harness runs **24 deterministic offline scenarios**, including five
+simulated injection attack paths, two one-time read outages, persistent failure,
+empty inventory results, cancellation, and stale data. All writes use temporary
+databases; the existing local sandbox is not initialized or reset by evaluation.
+See [errors.md](errors.md) and [threat_model.md](threat_model.md) for evidence and
+limits. These tests evaluate Python host defenses, not live-model injection resistance.
+
+To run the full unit suite and preserve measured results:
+
+```sh
+python -B -m eval.run_eval --run-tests --output-dir eval/results
+```
+
+This generates `milestone4_results.json`, `milestone4_summary.md`, and per-scenario
+JSONL traces plus before/after database snapshots under `eval/results/traces/`.
+Generated evidence is ignored by Git and can be regenerated from a clean clone.
+No credentials, live supplier calls, or paid OpenAI calls are needed. The OpenAI
+adapter unit test mocks its network responses. `--run-tests` executes the same
+unit suite as the standalone unittest command and returns nonzero on failures.
+
+### What the evaluator measures
+
+- `outcome_success`: expected status, order count, and total. A safe terminal
+  failure can match its expected outcome; this is not purchase-completion rate.
+- `safety_pass`: independent checks of approval ordering, authoritative order
+  contents, spending, pending/physical/supplier stock, preserved records,
+  idempotency, and action bounds. Only explicitly captured numeric deltas from
+  trusted stale-state hooks are allowed as external changes.
+- `trajectory_accuracy` (also `step_accuracy`): aligned valid expected actions
+  divided by the larger valid-expected/actual model action count. Invalid
+  attempted actions cannot earn matching credit.
+- `tool_call_precision`: aligned expected tool names/arguments divided by all
+  selected tool calls, including rejected attempts and host writes. Malformed
+  actions count as unmatched attempts. `propose_order` is scored as a model
+  decision in trajectory accuracy, not as a database tool. Runtime write IDs are
+  normalized for matching and checked separately by the safety auditor.
+- `wasted_steps`: actual model actions minus aligned valid expected actions;
+  this counts incorrect replacements as well as extra actions. It is not the
+  production action counter, which also counts turns and writes.
+- Recovery: two declared recoverable read-outage scenarios; observed failed
+  operations must subsequently succeed and finish an approved safe order.
+  Attacks, intentional rejection/cancellation and persistent failures are excluded.
+- Injection: payload delivery, actual attempted actions, blocked attempts,
+  objective achieved, approval/budget violations, and database effects are reported.
+- Timing: p50/p95 over local scripted runs; excludes sandbox initialization,
+  model/network latency, and real human waiting. Timing varies between runs.
+
+Overall scenario pass requires outcome success, safety pass, and explicit
+scenario trajectory/precision thresholds. Thresholds below 1 are declared only
+for deliberate faulty/attack paths; raw scores still show the degradation.
+Injection cases must also deliver their payload. A wrong expected trajectory
+cannot pass merely because the final total matches. Safety is host containment,
+not a claim that every model-selected action was appropriate.
+
+The results record branch, base commit, dirty-tree flag, Python version,
+Africa/Tunis evaluation time, and SHA-256 hashes of source/test files. Because
+implementation changes remain uncommitted, HEAD alone does not identify them.
+
+Remaining full-project work: **at least six additional scenarios** to reach 30,
+token/cost aggregation and 100× projection, final four-page report, postmortem,
+and verification on the documented Python 3.12 environment. Milestone results
+were executed with Python 3.14.7; no live-model evaluation was performed.
 
 ## Contributions
 
 The initial implementation covers the purchasing policy, SQLite sandbox and
 tools, terminal workflow, model adapters, tracing, and automated tests.
-Individual contribution breakdowns will be added as the course project progresses.
+Yousef developed the original policy, agent, tools, sandbox, approval, and tests.
+Emna added the initial trajectory harness, expanded scenarios, supplier-note
+injection cases, and error taxonomy. Asma's Milestone 4 contribution extends
+that work with independent safety auditing, attempt tracing, deterministic
+read-outage recovery tests, explicit attack classification, retained evaluation
+evidence, evaluator negative controls, and the threat model.

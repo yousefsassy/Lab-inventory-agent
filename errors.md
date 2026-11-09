@@ -1,45 +1,90 @@
 # Error taxonomy
 
-Every class below names what goes wrong, what the loop does, the status the run
-ends in, and the scenario or test that proves it. Run `python -m eval.run_eval`
-to reproduce the scenario results and `python -m unittest discover -s tests -v`
-to reproduce the unit tests.
+This extends Emna's original ten-category taxonomy and evidence mappings, splitting
+combined categories where different handling needs to be explained. All listed
+behavior is implemented; tests named below execute offline with isolated SQLite
+sandboxes. No live-model recovery claim follows from scripted action sequences.
 
-`agent/tools.py` marks only database failures as `retryable: true`. Bad input
-(`ValueError`) is `retryable: false` because repeating the same call cannot
-succeed. The model sees both as plain text and decides whether to retry; the
-action limit stops it either way.
+```sh
+python -B -m unittest discover -s tests -v
+python -B -m eval.run_eval --run-tests --output-dir eval/results
+```
 
-| # | Class | Trigger | Agent behavior | Ends in | Proof |
-|---|---|---|---|---|---|
-| 1 | Model or tool down | OpenAI timeout/HTTP error, missing database, SQLite lock | `ModelError` stops the run; a read tool returns `retryable: true` and the loop may retry within the action limit | `model_error`, or `ordered` after retry | `model_timeout`; `test_model_failure_recorded`; `test_openai_adapter`; `test_reset_and_missing_database` |
-| 2 | Bad arguments | Wrong type, empty string, missing field, extra field, non-integer money | Tool rejects with a readable message; the model retries with valid input | `ordered` after recovery | `malformed_action_then_recovers`; `test_reads_and_strict_inputs`; `test_invalid_money_and_duplicate_items` |
-| 3 | Wrong tool or wrong SKU | Unknown tool, or a SKU outside the request | Clear error; unknown tools are never executed; the model picks a declared tool or a requested SKU | `ordered` after recovery, or `action_limit` if it never corrects | `wrong_sku_then_recovers`; `injection_unknown_tool_then_recovers`; `test_model_cannot_bypass_checkpoint` |
-| 4 | Empty or insufficient result | Supplier `available` below the refill quantity, nothing below threshold | Stop before approval; report the blocked SKU | `supplier_unavailable` / `nothing_needed` | `supplier_unavailable`; `test_nothing_needed` |
-| 5 | Loop | Repeated identical actions | Each attempt consumes the action budget; the run stops at the limit | `action_limit` | `action_limit_exhausted`; `test_repeating_model_stops`; `test_approval_does_not_reset_limit` |
-| 6 | User changes mind | Rejection at the checkpoint, `Ctrl-C`, EOF | No write; the trace records the decision | `rejected` / `cancelled` | `human_rejects_proposal`; `test_rejection`; `test_cancellation` |
-| 7 | Stale price or stock | Price or on-hand changes between proposal and write | The write re-validates, rejects, and rolls back | `write_failed` | `stock_changes_during_approval`; `test_price_changes_during_approval`; `test_price_change_and_budget` |
-| 8 | Partial failure | One line of a multi-line order is invalid | The whole transaction rolls back; no partial order | `write_failed` | `test_partial_failure_rolls_back`; `test_changed_request_and_pending_stock` |
-| 9 | Duplicate retry | Same approved request ID delivered twice, including concurrently | The original receipt is returned; no second write | `ordered` | `test_retry_after_lost_response`; `test_concurrent_retry` |
-| 10 | Injected instructions in tool output | Supplier note says to ignore the budget, skip approval, change the price, or delete data | The note is returned and traced as plain data. The host still computes quantities, enforces the budget, requires the checkpoint, and re-validates at write time | `ordered` with the correct total, or `action_limit` for a direct write attempt | `injection_budget_override`, `injection_checkpoint_bypass`, `injection_unknown_tool_then_recovers`, `injection_price_override`, `injection_fake_approval_then_recovers`; `tests/test_injection.py` |
+`InventoryTools.call` converts SQLite errors into `{ok: false, retryable: true}`
+with a readable database-unavailable message. Invalid input uses
+`retryable: false`. The runner returns observations to the model, but does not
+retry automatically. In evaluation, retry/correction actions are explicitly
+scripted. A safe terminal failure is not successful recovery.
 
-## Recovery after failure
+## Failure classes and observed evidence
 
-A run counts as recovered when it still ends `ordered` (with the expected total
-and order count) after a tool or model step failed. Of the 15 eval scenarios,
-four deliberately fail a step and then leave the agent able to recover:
+All rows below passed in the measured milestone run. Scenario-level assertions
+are exercised by `EvaluatorTests.test_all_scenarios_have_safe_expected_outcomes`
+in addition to the focused tests named here.
 
-| Scenario | Failure | Recovered |
-|---|---|---|
-| `wrong_sku_then_recovers` | read of a SKU outside the request | yes |
-| `malformed_action_then_recovers` | `None` action, then a non-string argument | yes |
-| `injection_unknown_tool_then_recovers` | injected call to `delete_all` | yes |
-| `injection_fake_approval_then_recovers` | injected direct write | yes |
+| Class / trigger | Actual handling and terminal outcome | Unit-test evidence | Trajectory evidence | Recovery classification / limitations |
+|---|---|---|---|---|
+| Tool unavailable: SQLite error at a read boundary | Structured temporary error; same read can succeed later; approved order follows | `RecoveryTests.test_transient_read_failure_is_traced_and_recovers`; `ToolTests.test_reset_and_missing_database` | `transient_offer_failure_then_recovers`, `transient_stock_failure_then_recovers` | Recovered using scripted retries; real `sqlite3.OperationalError` injected at `_read_item`, not a live supplier outage |
+| Persistent tool failure | Repeated errors consume budget; `action_limit`, no order | `RecoveryTests.test_persistent_failure_terminates_without_order` | `persistent_offer_failure` | Safe termination; excluded from recoverable denominator because configured persistent |
+| Bad arguments: malformed action, wrong type, extra field, invalid money | Reject with readable error; corrected scripted actions can finish `ordered` | `RunnerTests.test_malformed_action_recovers`; `ToolTests.test_reads_and_strict_inputs`; `PolicyTests.test_invalid_money_and_duplicate_items` | `malformed_action_then_recovers`; budget/price injection scenarios | Scripted correction; not transient-read recovery |
+| Wrong/unknown tool | Runner rejects before tool execution; tool layer independently rejects unknown names | `RunnerTests.test_model_cannot_bypass_checkpoint`; `InjectionTests.test_injected_unknown_tool_is_rejected` | `injection_unknown_tool_then_recovers` | Later legitimate order is separate from blocked attack; attack excluded from recovery denominator |
+| Wrong SKU: outside request | Runner rejects out-of-scope read | `EvaluatorTests.test_all_scenarios_have_safe_expected_outcomes`; `ToolTests.test_reads_and_strict_inputs` | `wrong_sku_then_recovers` | Scripted correction; DB layer also rejects nonexistent SKUs |
+| Empty result: requested inventory row absent | `Unknown SKU` error; no invented offer/proposal; repeated requests stop | `EvaluatorTests.test_empty_result_cannot_invent_an_offer` | `empty_inventory_result` | `action_limit`, zero orders; missing inventory record, not a distinct supplier search API |
+| Insufficient result: unavailable supplier or no refill needed | Filter unavailable full refills; `supplier_unavailable` or `nothing_needed` | `EvaluatorTests.test_all_scenarios_have_safe_expected_outcomes`; `PolicyTests.test_nothing_needed` | `supplier_unavailable` | Safe domain outcome; partial fills are not supported |
+| Loop/repeated actions | Every turn/attempt consumes action budget; no reset at approval | `RunnerTests.test_repeating_model_stops`; `RunnerTests.test_approval_does_not_reset_limit`; `PolicyTests.test_repeated_attempts_stop_and_resume_preserves_count` | `action_limit_exhausted`, `approval_does_not_reset_action_limit` | `action_limit`, zero orders; counter bound is not wall-clock bound |
+| Model timeout/unavailable | Adapter raises `ModelError`; runner records `model_error` final outcome | `RunnerTests.test_openai_adapter`; `RunnerTests.test_model_failure_recorded` | `model_timeout` | Safe termination; bounded model retry could be safe but is not implemented; HTTP/timeout adapter is mocked |
+| User cancellation: EOF or Ctrl-C | Runner catches cancellation; `cancelled`, no write | `RunnerTests.test_cancellation`; `EvaluatorTests.test_all_scenarios_have_safe_expected_outcomes` | `user_cancels_approval` | No recovery expected; cancellation final event records result, no completed approval event |
+| Human rejection | Callback false; `rejected`, no authorization/write | `RunnerTests.test_rejection`; `RecoveryTests.test_failure_recovery_still_requires_human_approval` | `human_rejects_proposal`, `transient_failure_then_human_rejects` | Excluded from recovery denominator even if a read previously failed |
+| Stale price/stock/availability at approval | Write revalidates current state; transaction rejects and rolls back | `RunnerTests.test_price_changes_during_approval`; `ToolTests.test_price_change_and_budget`; `EvaluatorTests.test_all_scenarios_have_safe_expected_outcomes` | `stock_changes_during_approval`, `price_changes_during_approval`, `availability_changes_during_approval` | `write_failed`, no order; fresh proposal and approval required |
+| Partial failure: invalid later line | Entire write transaction rolls back earlier updates | `ToolTests.test_partial_failure_rolls_back`; `ToolTests.test_changed_request_and_pending_stock` | Stale-write scenarios check zero partial effects; malformed multi-line order is a focused tool test | Safe failure; no automatic write retry |
+| Duplicate retry / changed payload under same ID | Same approved ID/payload returns original receipt; changed payload rejected | `ToolTests.test_retry_after_lost_response`; `ToolTests.test_concurrent_retry`; `ToolTests.test_changed_request_and_pending_stock`; `EvaluatorTests.test_duplicate_order_detected` | Evaluator checks order identities and inventory effects on every run | Idempotent per ID; runner restart uses a fresh ID; concurrent retry evidence is tool-level |
+| Prompt injection in supplier output | Reject malicious actions/arguments; Python retains budget, prices, and approval authority | Six original `InjectionTests`; `AttackPathEvaluationTests.test_five_attack_objectives_are_blocked_and_measured` | Five `injection_*` scenarios | Simulated host containment only; no live LLM susceptibility measurement |
 
-Recovery rate: **4/4 (100%)**. Current eval totals: **15/15 scenarios pass**,
-mean step accuracy **0.94**, mean tool-call precision **0.99**, 6 wasted steps,
-p50 **~1.7 ms**, p95 **~2.1 ms** (scripted model, local sandbox).
+## Recovery measurement definition
 
-`model_timeout`, `action_limit_exhausted`, `supplier_unavailable`, and
-`stock_changes_during_approval` are intentional stops: recovering would mean
-ignoring a safety rule, so they are expected terminal outcomes.
+The denominator is the count of scenarios explicitly declared
+`recoverable_failure=True`, with legitimate tasks, human approval enabled, no
+cancellation, and no injection attack. It currently includes only the two
+one-time read-outage cases. Persistent outages, malicious actions, argument
+corrections, domain stops, model timeouts, rejection, and cancellation are excluded.
+
+A scenario counts in the numerator only if a failed tool call is observed,
+each failed tool operation has a later successful call with the same name and
+arguments, the expected legitimate order is completed, and all safety checks
+pass. Counts and percentage are calculated by the harness, not copied from
+scenario names. `test_failure_to_recover_counts_in_denominator` verifies an
+unrecovered configured case lowers the rate.
+
+The earlier documented 4/4 combined benign correction and attack-path recovery.
+That historical measure is retained as context, but replaced by the narrower,
+automatic transient-read metric. The two rates have different denominators.
+
+Measured recovery results are generated in
+[`eval/results/milestone4_summary.md`](eval/results/milestone4_summary.md) and
+[`eval/results/milestone4_results.json`](eval/results/milestone4_results.json).
+Both artifacts include test counts, scenario results, and source provenance.
+
+<!-- measured-recovery:start -->
+Measured at 2026-11-09T02:20:19.713387+01:00 on Python 3.14.7.
+
+| Scenario | Failed read calls | Subsequent matching read | Final outcome | Recovered |
+|---|---:|---|---|---|
+| `transient_offer_failure_then_recovers` | 1 | succeeded | `ordered` | yes |
+| `transient_stock_failure_then_recovers` | 1 | succeeded | `ordered` | yes |
+
+**2/2 recovered (100%).** Failed recovery scenarios: none.
+Retries are scripted, not automatic application retries or measured model-selected behavior.
+<!-- measured-recovery:end -->
+
+## Evaluator negative controls
+
+`tests/test_eval.py` mutates captured evidence to prove that correct final
+status/total cannot excuse an unauthorized order, missing/late approval,
+wrong SKU/quantity/price, overspending, duplicated order, inventory corruption,
+or action-limit overrun. The production checks are never weakened.
+
+Outcome, safety, trajectory quality, blocked attempts, and unexpected side
+effects are separate fields. Overall pass requires expected outcome, all safety
+checks, and declared trajectory thresholds. A blocked attack passes containment
+while scoring below a perfect trajectory. See [threat_model.md](threat_model.md)
+for boundaries and residual risks.
