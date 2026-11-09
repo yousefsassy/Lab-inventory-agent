@@ -73,21 +73,26 @@ review a new proposal.
 | [agent/models.py](agent/models.py) | OpenAI and scripted model adapters |
 | [agent/__main__.py](agent/__main__.py) | Terminal interface and local settings |
 | [sandbox/](sandbox/) | Sample inventory and database initialization and reset |
+| [eval/](eval/) | Trajectory scenarios and the path-level eval harness |
 | [tests/](tests/) | Policy, database, runner, and configuration tests |
 
 ## Tests and project status
 
 ```sh
 python -m unittest discover -s tests -v
+python -m eval.run_eval
 ```
 
 The current suite covers budget boundaries, action exhaustion, approval and
 rejection, stale prices, transaction rollback, duplicate writes, and local
 configuration. The automated OpenAI adapter test uses a simulated response.
 
-Milestones 1–3 cover policy, sandbox tools, and the interactive runner. The
-remaining course work includes the error taxonomy, adversarial tests,
-trajectory evaluation, cost measurements, and final report.
+The eval harness currently runs four deterministic trajectory scenarios from a
+fresh sandbox each time and reports task success, step accuracy, tool-call
+precision, wasted steps, and p50/p95 time. Milestones 1–3 cover policy, sandbox
+tools, and the interactive runner. The remaining course work is expanding the
+eval to 30+ scenarios and injection cases, then the error taxonomy, adversarial
+tests, cost measurements, and final report.
 
 ## Contributions
 
