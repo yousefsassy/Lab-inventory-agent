@@ -223,18 +223,4 @@ results. Offline token/cost fields are not applicable, not live zeroes.
 python -B -m eval.run_eval --run-tests --output-dir eval/results/offline
 ```
 
-## Contributions
 
-The initial implementation covers the purchasing policy, SQLite sandbox and
-tools, terminal workflow, model adapters, tracing, and automated tests.
-Yousef developed the original policy, agent, tools, sandbox, approval, and tests.
-Emna added the initial trajectory harness, expanded scenarios, supplier-note
-injection cases, and error taxonomy. Asma's Milestone 4 contribution extends
-that work with independent safety auditing, attempt tracing, deterministic
-read-outage recovery tests, explicit attack classification, retained evaluation
-evidence, evaluator negative controls, and the threat model.
-
-The Milestone 5 contribution extends evaluation to 30 scenarios, adds bounded
-GPT-6 Luna compatibility and cache-aware cost accounting, and records the ten
-explicitly authorized real-model trials. No academic final report or postmortem
-has been written.
