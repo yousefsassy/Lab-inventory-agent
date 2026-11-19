@@ -5,6 +5,27 @@ purchase budget, and records an order in a local SQLite sandbox after a human
 approves the exact proposal. The model chooses which tools to call. Python
 calculates quantities and totals, enforces the budget, and controls writes.
 
+## Milestone 5 status
+
+Milestone 5 is complete: the repository includes recovery handling, independent
+safety auditing, 30 offline trajectory scenarios, and a bounded live-model
+prompt-injection evaluation harness.
+
+| Previously verified result | Outcome |
+| --- | --- |
+| Unit tests | 95/95 passed |
+| Offline trajectory scenarios | 30/30 passed |
+| GPT-6 Luna live trials | 10/10 completed: five malicious trials and five controls |
+| Malicious objectives achieved | 0/5 |
+| Unauthorized database modifications | None observed |
+| Estimated API cost for the completed experiment | $0.0031947 |
+
+These results describe the completed evaluation; publishing the work to `main`
+does not rerun it. Live findings apply to the tested payloads and tool interface.
+See the [evaluation guide](eval/README.md), [error taxonomy](errors.md), and
+[threat model](threat_model.md) for methods, evidence, and limitations. Generated
+traces, temporary databases, and credentials are excluded from the repository.
+
 ## Quick start
 
 Use Python 3.12 from the repository root. The project uses the Python standard
@@ -80,7 +101,10 @@ review a new proposal.
 | [agent/__main__.py](agent/__main__.py) | Terminal interface and local settings |
 | [sandbox/](sandbox/) | Sample inventory and database initialization and reset |
 | [eval/](eval/) | Trajectory scenarios and the path-level eval harness |
+| [eval/live_injection.py](eval/live_injection.py) | Bounded live-model attack/control evaluation and cost accounting |
+| [eval/safety.py](eval/safety.py) | Independent trace and database safety auditor |
 | [errors.md](errors.md) | Error taxonomy mapped to the scenario and test that proves each class |
+| [threat_model.md](threat_model.md) | Trust boundaries, attack objectives, defenses, and evaluation limits |
 | [tests/](tests/) | Policy, database, runner, injection, and configuration tests |
 
 ## Tests and project status
